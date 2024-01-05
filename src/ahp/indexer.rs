@@ -85,10 +85,12 @@ pub(crate) fn sum_matrices<F: PrimeField>(
     b: &Matrix<F>,
     c: &Matrix<F>,
 ) -> Vec<Vec<usize>> {
+    // @! 第一维 第几行
     a.iter()
         .zip(b)
         .zip(c)
         .map(|((row_a, row_b), row_c)| {
+            // @! 第二维 用到的所有变量的索引（去重）
             row_a
                 .iter()
                 .map(|(_, i)| *i)

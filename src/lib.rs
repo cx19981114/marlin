@@ -12,7 +12,7 @@
 #![deny(stable_features, unreachable_pub, non_shorthand_field_patterns)]
 #![deny(unused_attributes, unused_imports, unused_mut, missing_docs)]
 #![deny(renamed_and_removed_lints, stable_features, unused_allocation)]
-#![deny(unused_comparisons, bare_trait_objects, unused_must_use, const_err)]
+#![deny(unused_comparisons, bare_trait_objects, unused_must_use)]
 #![forbid(unsafe_code)]
 
 #[macro_use]
@@ -169,6 +169,7 @@ impl<F: PrimeField, PC: PolynomialCommitment<F, DensePolynomial<F>>, FS: FiatSha
             AHPForR1CS::prover_first_round(prover_init_state, zk_rng)?;
 
         let first_round_comm_time = start_timer!(|| "Committing to first round polys");
+        // @! 4 MSM
         let (first_comms, first_comm_rands) = PC::commit(
             &index_pk.committer_key,
             prover_first_oracles.iter(),
@@ -190,6 +191,7 @@ impl<F: PrimeField, PC: PolynomialCommitment<F, DensePolynomial<F>>, FS: FiatSha
             AHPForR1CS::prover_second_round(&verifier_first_msg, prover_state, zk_rng);
 
         let second_round_comm_time = start_timer!(|| "Committing to second round polys");
+        // @! 3 MSM 
         let (second_comms, second_comm_rands) = PC::commit(
             &index_pk.committer_key,
             prover_second_oracles.iter(),
@@ -210,6 +212,7 @@ impl<F: PrimeField, PC: PolynomialCommitment<F, DensePolynomial<F>>, FS: FiatSha
             AHPForR1CS::prover_third_round(&verifier_second_msg, prover_state, zk_rng)?;
 
         let third_round_comm_time = start_timer!(|| "Committing to third round polys");
+        // @! 2 MSM
         let (third_comms, third_comm_rands) = PC::commit(
             &index_pk.committer_key,
             prover_third_oracles.iter(),

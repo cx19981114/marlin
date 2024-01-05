@@ -49,9 +49,11 @@ pub struct ProverState<'a, F: PrimeField> {
     domain_x: GeneralEvaluationDomain<F>,
 
     /// domain H, sized for constraints
+    ///@! |H| = n = max(row, col)
     domain_h: GeneralEvaluationDomain<F>,
 
     /// domain K, sized for matrix nonzero elements
+    /// @! |K| = m, max(矩阵A/B/C非零个数)
     domain_k: GeneralEvaluationDomain<F>,
 }
 
@@ -267,6 +269,7 @@ impl<F: PrimeField> AHPForR1CS<F> {
             acc
         };
 
+        // @! z_a/z_b num_constraint value
         let eval_z_a_time = start_timer!(|| "Evaluating z_A");
         let z_a = index.a.iter().map(|row| inner_prod_fn(row)).collect();
         end_timer!(eval_z_a_time);
@@ -314,20 +317,24 @@ impl<F: PrimeField> AHPForR1CS<F> {
         let domain_h = state.domain_h;
         let zk_bound = state.zk_bound;
 
+        // @! polynomial coeff
         let v_H = domain_h.vanishing_polynomial().into();
 
         let x_time = start_timer!(|| "Computing x polynomial and evals");
         let domain_x = state.domain_x;
+        // @! ifft: degree = |X|
         let x_poly = EvaluationsOnDomain::from_vec_and_domain(
             state.formatted_input_assignment.clone(),
             domain_x,
         )
         .interpolate();
+        // @! fft: degree = |H|
         let x_evals = domain_h.fft(&x_poly);
         end_timer!(x_time);
 
         let ratio = domain_h.size() / domain_x.size();
 
+        // @! w_extented.len = |H| - |X|
         let mut w_extended = state.witness_assignment.clone();
         w_extended.extend(vec![
             F::zero();
@@ -336,6 +343,14 @@ impl<F: PrimeField> AHPForR1CS<F> {
                 - state.witness_assignment.len()
         ]);
 
+        // @! 为了计算 Z(X) = 前x个是public input 后h-x个是witness input
+        // @! if ratio = 2
+        // @! public_input = [a, b, c]
+        // @! domain_x = [a, b, c]
+        // @! domain_h = [a, 0, b, 0, c, 0]
+        // @! w_poly = [0, w[0] - x[1], 0, w[1] - x[3]]
+        // @! x_poly = [x[0], x[1], x[2], x[3]]
+        // @! w_poly + x_poly = [x[0], w[0], x[2], w[1], ]
         let w_poly_time = start_timer!(|| "Computing w polynomial");
         let w_poly_evals = cfg_into_iter!(0..domain_h.size())
             .map(|k| {
@@ -347,21 +362,26 @@ impl<F: PrimeField> AHPForR1CS<F> {
             })
             .collect();
 
+        // @! ifft: degree = |H|
         let w_poly = &EvaluationsOnDomain::from_vec_and_domain(w_poly_evals, domain_h)
             .interpolate()
             + &(&DensePolynomial::from_coefficients_slice(&[F::rand(rng)]) * &v_H);
         let (w_poly, remainder) = w_poly.divide_by_vanishing_poly(domain_x).unwrap();
+        // @? 为什么w_poly在domain H上插值 但是可以被domain X的vanishing poly除尽
+        // @! domain x 是domian h 的子群
         assert!(remainder.is_zero());
         end_timer!(w_poly_time);
 
         let z_a_poly_time = start_timer!(|| "Computing z_A polynomial");
         let z_a = state.z_a.clone().unwrap();
+        // @! ifft: degree = |H|
         let z_a_poly = &EvaluationsOnDomain::from_vec_and_domain(z_a, domain_h).interpolate()
             + &(&DensePolynomial::from_coefficients_slice(&[F::rand(rng)]) * &v_H);
         end_timer!(z_a_poly_time);
 
         let z_b_poly_time = start_timer!(|| "Computing z_B polynomial");
         let z_b = state.z_b.clone().unwrap();
+        // @! ifft: degree = |H|
         let z_b_poly = &EvaluationsOnDomain::from_vec_and_domain(z_b, domain_h).interpolate()
             + &(&DensePolynomial::from_coefficients_slice(&[F::rand(rng)]) * &v_H);
         end_timer!(z_b_poly_time);
@@ -370,6 +390,7 @@ impl<F: PrimeField> AHPForR1CS<F> {
         let mask_poly_degree = 3 * domain_h.size() + 2 * zk_bound - 3;
         let mut mask_poly = DensePolynomial::rand(mask_poly_degree, rng);
 
+        // @! sum mask(x) = 0, x属于H 
         let nh = domain_h.size();
         let upper_bound = mask_poly_degree / nh;
         let mut r_0 = F::zero();
@@ -466,6 +487,7 @@ impl<F: PrimeField> AHPForR1CS<F> {
         let (z_a_poly, z_b_poly) = state.mz_polys.as_ref().unwrap();
         let z_c_poly = z_a_poly.polynomial() * z_b_poly.polynomial();
 
+        // @! degree(summed_z_m) = 2|H|
         let mut summed_z_m_coeffs = z_c_poly.coeffs;
         // Note: Can't combine these two loops, because z_c_poly has 2x the degree
         // of z_a_poly and z_b_poly, so the second loop gets truncated due to
@@ -479,16 +501,19 @@ impl<F: PrimeField> AHPForR1CS<F> {
         let summed_z_m = DensePolynomial::from_coefficients_vec(summed_z_m_coeffs);
         end_timer!(summed_z_m_poly_time);
 
+        // @! [ZH(alpha) / (alpha - 1), ZH(alpha) / (alpha - omega), ZH(alpha) / (alpha - omega^2)]
         let r_alpha_x_evals_time = start_timer!(|| "Compute r_alpha_x evals");
         let r_alpha_x_evals =
             domain_h.batch_eval_unnormalized_bivariate_lagrange_poly_with_diff_inputs(alpha);
         end_timer!(r_alpha_x_evals_time);
 
         let r_alpha_poly_time = start_timer!(|| "Compute r_alpha_x poly");
+        // @! ifft: degree = |H|
         let r_alpha_poly = DensePolynomial::from_coefficients_vec(domain_h.ifft(&r_alpha_x_evals));
         end_timer!(r_alpha_poly_time);
 
         let t_poly_time = start_timer!(|| "Compute t poly");
+        // @! ifft: degree = |H|
         let t_poly = Self::calculate_t(
             vec![&state.index.a, &state.index.b, &state.index.c].into_iter(),
             &[eta_a, eta_b, eta_c],
@@ -503,6 +528,7 @@ impl<F: PrimeField> AHPForR1CS<F> {
         let domain_x = GeneralEvaluationDomain::new(state.formatted_input_assignment.len())
             .ok_or(SynthesisError::PolynomialDegreeTooLarge)
             .unwrap();
+        // @! ifft: degree = |X|
         let x_poly = EvaluationsOnDomain::from_vec_and_domain(
             state.formatted_input_assignment.clone(),
             domain_x,
@@ -529,6 +555,8 @@ impl<F: PrimeField> AHPForR1CS<F> {
         .unwrap();
         let mul_domain = GeneralEvaluationDomain::new(mul_domain_size)
             .expect("field is not smooth enough to construct domain");
+        // @! maybe long time ?fft/?evaluate
+        // @? 先在小的domain上做计算 再在小的domain上插值成多项式 再eval在大的domain上 再插值成大的domain上的多项式
         let mut r_alpha_evals = r_alpha_poly.evaluate_over_domain_by_ref(mul_domain);
         let summed_z_m_evals = summed_z_m.evaluate_over_domain_by_ref(mul_domain);
         let z_poly_evals = z_poly.evaluate_over_domain_by_ref(mul_domain);
@@ -542,6 +570,7 @@ impl<F: PrimeField> AHPForR1CS<F> {
                 *a *= b;
                 *a -= c * d;
             });
+        // @! fft |3H|
         let rhs = r_alpha_evals.interpolate();
         let q_1 = mask_poly.polynomial() + &rhs;
         end_timer!(q_1_time);
@@ -652,6 +681,7 @@ impl<F: PrimeField> AHPForR1CS<F> {
                 .zip(&row_col_on_K.evals)
                 .map(|((r, c), r_c)| alpha_beta - alpha * r - beta * c + r_c)
                 .collect();
+            // @! fft |K| 
             EvaluationsOnDomain::from_vec_and_domain(evals, domain_k).interpolate()
         };
         end_timer!(b_poly_time);
@@ -678,10 +708,13 @@ impl<F: PrimeField> AHPForR1CS<F> {
         end_timer!(f_evals_time);
 
         let f_poly_time = start_timer!(|| "Computing f poly");
+        // @! fft |K|
         let f = EvaluationsOnDomain::from_vec_and_domain(f_evals_on_K, domain_k).interpolate();
         end_timer!(f_poly_time);
 
         let h_2_poly_time = start_timer!(|| "Computing sumcheck h poly");
+        // @! 第二轮的方案： 先找一个2k大小的domian, b/f在2k大小的domain上得到值, 对值进行操作，最后再插值出多项式
+        // @? 那个更优？
         let h_2 = (&a_poly - &(&b_poly * &f))
             .divide_by_vanishing_poly(domain_k)
             .unwrap()

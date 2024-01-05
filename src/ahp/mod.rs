@@ -73,6 +73,7 @@ impl<F: PrimeField> AHPForR1CS<F> {
         num_variables: usize,
         num_non_zero: usize,
     ) -> Result<usize, Error> {
+        // max(num_variables, num_constraints)
         let padded_matrix_dim =
             constraint_systems::padded_matrix_dim(num_variables, num_constraints);
         let zk_bound = 1;
@@ -81,11 +82,11 @@ impl<F: PrimeField> AHPForR1CS<F> {
         let domain_k_size = GeneralEvaluationDomain::<F>::compute_size_of_domain(num_non_zero)
             .ok_or(SynthesisError::PolynomialDegreeTooLarge)?;
         Ok(*[
-            2 * domain_h_size + zk_bound - 2,
+            2 * domain_h_size + zk_bound - 2, // h1
             3 * domain_h_size + 2 * zk_bound - 3, //  mask_poly
-            domain_h_size,
-            domain_h_size,
-            domain_k_size - 1,
+            domain_h_size, // h0
+            domain_h_size, // max(t, h1, g1)
+            domain_k_size - 1, // h2, g2
         ]
         .iter()
         .max()
